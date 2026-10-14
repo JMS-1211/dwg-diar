@@ -43,9 +43,11 @@ jobs:
           D="시험 폴더/받아쓰기"
           mkdir -p "$D"
           curl -fsSL -o seg.tar.bz2 $B/speaker-segmentation-models/sherpa-onnx-pyannote-segmentation-3-0.tar.bz2 && tar xjf seg.tar.bz2
+          curl -fsSL -o emb.onnx $B/speaker-recongition-models/3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx
+          curl -fsSL -o test.wav $B/speaker-segmentation-models/0-four-speakers-zh.wav
           cp sherpa-onnx-pyannote-segmentation-3-0/model.onnx "$D/diar-segmentation.onnx"
-          curl -fsSL -o "$D/diar-embedding.onnx" $B/speaker-recongition-models/3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx
-          curl -fsSL -o "$D/녹음 시험.wav" $B/speaker-segmentation-models/0-four-speakers-zh.wav
+          cp emb.onnx "$D/diar-embedding.onnx"
+          cp test.wav "$D/녹음 시험.wav"
           cp out/dwg-diar.exe "$D/"
           cd "$D"
           ./dwg-diar.exe --in "녹음 시험.wav" --seg diar-segmentation.onnx --emb diar-embedding.onnx --out "결과.화자" > run.txt 2>&1; echo "exit $?" >> run.txt
