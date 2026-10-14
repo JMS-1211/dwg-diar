@@ -4,7 +4,7 @@
 //  · 녹음 전체를 한 번에 구분해서 화자 번호가 처음부터 끝까지 이어짐
 //
 //  dwg-diar --in 녹음.wav --seg segmentation.onnx --emb embedding.onnx --out 결과.화자
-//           [--threads N] [--threshold 0.5] [--speakers N(모르면 0)] [--parent-pid N]
+//           [--threads N] [--threshold 0.5] [--speakers N(모르면 0)] [--shift 0.25] [--parent-pid N]
 //  표준 출력 (돼굴돼굴이 읽음):
 //    DUR <ms>   P <한 것> <전체>   SPK <화자 수>   DONE <걸린 ms>   ERR <내용>
 //  결과 파일: 한 줄에 '시작ms 끝ms 화자번호(0부터)' — 시작 순서
@@ -104,7 +104,7 @@ int main(int argc, char ** argv) {
 #endif
     pstr in, seg, emb, outp;
     int threads = std::max(1u, std::thread::hardware_concurrency() / 2);
-    float threshold = 0.5f; int speakers = 0; unsigned long parent_pid = 0;
+    float threshold = 0.5f, shift = 0; int speakers = 0; unsigned long parent_pid = 0;
     for (int i = 1; i + 1 < argc; i += 2) {
         pstr k = argv[i], v = argv[i + 1];
         std::string ks = to_utf8(k), vs = to_utf8(v);
@@ -112,6 +112,7 @@ int main(int argc, char ** argv) {
         else if (ks == "--threads") threads = std::max(1, atoi(vs.c_str()));
         else if (ks == "--threshold") threshold = (float)atof(vs.c_str());
         else if (ks == "--speakers") speakers = std::max(0, atoi(vs.c_str()));
+        else if (ks == "--shift") shift = (float)atof(vs.c_str());
         else if (ks == "--parent-pid") parent_pid = strtoul(vs.c_str(), nullptr, 10);
     }
     if (in.empty() || seg.empty() || emb.empty() || outp.empty()) { out("ERR 사용법: dwg-diar --in 녹음.wav --seg 모델 --emb 모델 --out 결과"); return 2; }
@@ -145,9 +146,10 @@ int main(int argc, char ** argv) {
     SherpaOnnxOfflineSpeakerDiarizationConfig cfg;
     memset(&cfg, 0, sizeof(cfg));
     cfg.segmentation.pyannote.model = seg8.c_str();
-    // 창 이동 간격: 짧은 녹음은 촘촘히(1초), 긴 녹음은 덩어리 수를 4000개 안팎으로 묶어 메모리 · 시간을 줄임
+    // 창 이동 간격 (창 10초의 몇 배): 기본 2.5초 — 1초와 결과가 거의 같고 시간은 절반
+    //  아주 긴 녹음(약 3시간 넘음)은 덩어리를 4000개 안팎으로 묶어 메모리 · 시간을 줄임 (최대 5초)
     double sec = dur / 1000.0;
-    cfg.segmentation.pyannote.window_shift_ratio = (float)std::min(0.5, std::max(0.1, sec / (10.0 * 4000)));
+    cfg.segmentation.pyannote.window_shift_ratio = shift > 0 ? shift : (float)std::min(0.5, std::max(0.25, sec / (10.0 * 4000)));
     cfg.segmentation.num_threads = threads;
     cfg.segmentation.provider = "cpu";
     cfg.embedding.model = emb8.c_str();
@@ -172,16 +174,23 @@ int main(int argc, char ** argv) {
 
     FILE * fo = open_write(outp);
     if (!fo) { out("ERR 결과 파일을 만들지 못했어요"); return 6; }
+    // 화자 번호를 처음 말한 순서대로 0, 1, 2 … 로 다시 매김
+    std::vector<int> remap; int next = 0;
+    for (int i = 0; i < n; i++) {
+        int k = s[i].speaker; if (k < 0) continue;
+        if ((int)remap.size() <= k) remap.resize(k + 1, -1);
+        if (remap[k] < 0) remap[k] = next++;
+    }
     bool ok = true;
     for (int i = 0; i < n; i++)
-        if (fprintf(fo, "%lld %lld %d\n", (long long)llround(s[i].start * 1000.0), (long long)llround(s[i].end * 1000.0), s[i].speaker) < 0) ok = false;
+        if (s[i].speaker >= 0 && fprintf(fo, "%lld %lld %d\n", (long long)llround(s[i].start * 1000.0), (long long)llround(s[i].end * 1000.0), remap[s[i].speaker]) < 0) ok = false;
     if (fclose(fo) != 0) ok = false;
     if (s) SherpaOnnxOfflineSpeakerDiarizationDestroySegment(s);
     SherpaOnnxOfflineSpeakerDiarizationDestroyResult(res);
     SherpaOnnxDestroyOfflineSpeakerDiarization(sd);
     if (!ok) { out("ERR 결과 파일을 저장하지 못했어요"); return 6; }
 
-    out("SPK %d", ns);
+    out("SPK %d", next > 0 ? next : ns);
     out("DONE %lld", (long long)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count());
     return 0;
 }
