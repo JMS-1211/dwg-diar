@@ -1,0 +1,35 @@
+name: models
+# 발화자 구분 모델과 시험용 소리를 공식 배포처에서 받아 'models' 브랜치에 올림 (지문 기록 포함)
+on:
+  push:
+    paths: ['.github/workflows/models.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 받기
+        run: |
+          set -e
+          mkdir out && cd out
+          B=https://github.com/k2-fsa/sherpa-onnx/releases/download
+          curl -fsSL -o seg.tar.bz2 $B/speaker-segmentation-models/sherpa-onnx-pyannote-segmentation-3-0.tar.bz2
+          tar xjf seg.tar.bz2 && rm seg.tar.bz2
+          mv sherpa-onnx-pyannote-segmentation-3-0 segmentation
+          for f in 3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx 3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx 3dspeaker_speech_eres2net_large_sv_zh-cn_3dspeaker_16k.onnx wespeaker_en_voxceleb_resnet34_LM.onnx; do
+            curl -fsSL -o $f $B/speaker-recongition-models/$f || echo "없음 $f"
+          done
+          curl -fsSL -o test-four-speakers-zh.wav $B/speaker-segmentation-models/0-four-speakers-zh.wav
+          ls -laR
+          find . -type f -exec sha256sum {} \; | sort -k2 > SHA256.txt
+          cat SHA256.txt
+      - name: 올리기
+        run: |
+          cd out
+          git init -q -b models
+          git config user.name "dwg-diar build"
+          git config user.email "actions@github.com"
+          git add -A && git commit -qm "모델 받기 (공식 배포처)"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" models
