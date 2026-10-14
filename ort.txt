@@ -1,0 +1,10 @@
+-- SHERPA_ONNX_USE_PRE_INSTALLED_ONNXRUNTIME_IF_AVAILABLE ON
+-- location_onnxruntime_header_dir: location_onnxruntime_header_dir-NOTFOUND
+-- location_onnxruntime_lib: location_onnxruntime_lib-NOTFOUND
+-- Could not find a pre-installed onnxruntime.
+-- Downloading pre-compiled onnxruntime
+-- Use static onnxruntime libraries
+-- Downloading onnxruntime from https://github.com/csukuangfj/onnxruntime-libs/releases/download/v1.28.2/onnxruntime-win-x64-static_lib-MT-Release-1.28.2.tar.bz2
+-- onnxruntime is downloaded to D:/a/dwg-diar/dwg-diar/b/_deps/onnxruntime-src
+-- onnxruntime lib files: D:/a/dwg-diar/dwg-diar/b/_deps/onnxruntime-src/lib/onnxruntime.lib
+-- ONNXRUNTIME_DIR: D:/a/dwg-diar/dwg-diar/b/_deps/onnxruntime-src
