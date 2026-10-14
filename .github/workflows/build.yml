@@ -1,0 +1,65 @@
+name: build
+# 발화자 구분 실행 파일(dwg-diar.exe)을 윈도우에서 소스로 빌드하고, 시험한 뒤 'build' 브랜치에 올림
+on:
+  push:
+    paths: ['src/**', '.github/workflows/build.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+env:
+  SHERPA_TAG: v1.13.8
+jobs:
+  windows:
+    runs-on: windows-2022
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - name: sherpa-onnx 소스 받기
+        run: |
+          git clone --depth 1 -b $SHERPA_TAG https://github.com/k2-fsa/sherpa-onnx sherpa
+          git -C sherpa rev-parse HEAD > sherpa-commit.txt
+          cat >> sherpa/sherpa-onnx/c-api/CMakeLists.txt <<'CM'
+
+          # 돼굴돼굴 발화자 구분
+          add_executable(dwg-diar ${CMAKE_SOURCE_DIR}/../src/dwg-diar.cpp)
+          target_include_directories(dwg-diar PRIVATE ${CMAKE_SOURCE_DIR})
+          target_link_libraries(dwg-diar sherpa-onnx-c-api)
+          CM
+      - name: 빌드
+        run: |
+          cmake -S sherpa -B b -A x64 -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DSHERPA_ONNX_USE_STATIC_CRT=ON \
+            -DSHERPA_ONNX_ENABLE_BINARY=OFF -DSHERPA_ONNX_ENABLE_PORTAUDIO=OFF -DSHERPA_ONNX_ENABLE_WEBSOCKET=OFF \
+            -DSHERPA_ONNX_ENABLE_TTS=OFF -DSHERPA_ONNX_ENABLE_PYTHON=OFF -DSHERPA_ONNX_ENABLE_TESTS=OFF > cmake.log 2>&1 || { tail -40 cmake.log; echo "::error::cmake 실패 $(tail -15 cmake.log | tr '\n' ' ')"; exit 1; }
+          grep -i "onnxruntime" cmake.log | head -20 > ort.txt || true
+          cmake --build b --config Release --target dwg-diar -j 4 > build.log 2>&1 || { grep -i "error" build.log | head -20; echo "::error::빌드 실패 $(grep -i ' error ' build.log | head -8 | tr '\n' ' ')"; exit 1; }
+          find b -name dwg-diar.exe
+          mkdir -p out && cp "$(find b -name dwg-diar.exe | head -1)" out/
+          ls -la out
+      - name: 시험 (한글 폴더)
+        run: |
+          B=https://github.com/k2-fsa/sherpa-onnx/releases/download
+          D="시험 폴더/받아쓰기"
+          mkdir -p "$D"
+          curl -fsSL -o seg.tar.bz2 $B/speaker-segmentation-models/sherpa-onnx-pyannote-segmentation-3-0.tar.bz2 && tar xjf seg.tar.bz2
+          cp sherpa-onnx-pyannote-segmentation-3-0/model.onnx "$D/diar-segmentation.onnx"
+          curl -fsSL -o "$D/diar-embedding.onnx" $B/speaker-recongition-models/3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx
+          curl -fsSL -o "$D/녹음 시험.wav" $B/speaker-segmentation-models/0-four-speakers-zh.wav
+          cp out/dwg-diar.exe "$D/"
+          cd "$D"
+          ./dwg-diar.exe --in "녹음 시험.wav" --seg diar-segmentation.onnx --emb diar-embedding.onnx --out "결과.화자" > run.txt 2>&1; echo "exit $?" >> run.txt
+          cat run.txt; cat "결과.화자" || true
+          cp run.txt "$GITHUB_WORKSPACE/out/test-run.txt"; cp "결과.화자" "$GITHUB_WORKSPACE/out/test-result.txt" || true
+          echo "::notice::$(tr '\n' ';' < run.txt) | $(head -20 결과.화자 | tr '\n' ';')"
+      - name: 올리기
+        run: |
+          cd out
+          cp ../sherpa-commit.txt ../ort.txt .
+          sha256sum dwg-diar.exe > SHA256.txt
+          echo "::notice::$(cat SHA256.txt) sherpa $(cat sherpa-commit.txt)"
+          git init -q -b build
+          git config user.name "dwg-diar build"
+          git config user.email "actions@github.com"
+          git add -A && git commit -qm "dwg-diar.exe 빌드 ($GITHUB_SHA)"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" build > push.log 2>&1 || { echo "::error::$(tr '\n' ' ' < push.log)"; exit 1; }
